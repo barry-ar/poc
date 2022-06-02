@@ -1,0 +1,24 @@
+- name: "Setup Install kubernetes"
+  hosts: localhost
+  gather_facts: yes
+  become: yes
+
+  tasks:
+
+  - name: 'INFRA | Create k3s config dir'
+    ansible.builtin.file:
+      path: /etc/rancher/k3s
+      state: directory
+      owner: root
+      group: root
+      mode: '0755'
+  - name: 'INFRA | Copy file'
+    ansible.builtin.copy:
+      src: /algoan/ansible/config.yaml
+      dest: /etc/rancher/k3s/config.yaml
+      owner: root
+      group: root
+      mode: '0644'
+  - name: 'INFRA | Install K3s'
+    ansible.builtin.shell:
+    cmd: curl -sfL https://get.k3s.io | sh -

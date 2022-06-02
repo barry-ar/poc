@@ -1,0 +1,156 @@
+apiVersion: v1
+data:
+  password-mysql: YWxnb2Fu
+kind: Secret
+metadata:
+  name: secret-mysql
+  namespace: algoan
+---
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv-volume
+  labels:
+    type: local
+  namespace: algoan
+spec:
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  hostPath:
+    path: "/mnt/data"
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pv-claim
+  namespace: algoan
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: algoan
+spec:
+  ports:
+  - port: 3306
+  selector:
+    app: mysql
+  clusterIP: None
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: algoan
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - image: mysql:5.6
+        name: mysql
+        env:
+          # Is not good, You must use a Vault server from Hashicorp or Secret manager from GCP or other cloud
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: secret-mysql
+              key: password
+        resources:
+          limits:
+            cpu: "2"
+          requests:
+            cpu: "500m"
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pv-claim        
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mysql
+  namespace: algoan
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mysql
+  minReplicas: 1
+  maxReplicas: 30
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0  # Do not gather recommendations, instantly scale up to the calculated number of replicas
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15  # We can double pods every <periodSeconds> seconds.
+        - type: Pods
+          value: 10
+          periodSeconds: 15  # We can add up to <value> pods every <periodSeconds> seconds.
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait <stabilizationWindowSeconds> min for the largest recommendation and then scale down to that value
+      policies:
+        - type: Percent
+          value: 30
+          periodSeconds: 30
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mysql-netpol
+  namespace: algoan
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: algoan
+          podSelector:
+            matchLabels:
+              app: algoan
+      ports:
+        - protocol: TCP
+          port: 3306

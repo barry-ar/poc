@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ./backend.yml
+- ./db.yaml
+- ./ns.json
+
+images:
+- name: eu.gcr.io/projectAlgoanID/algoan_image
+  newTag: v0.1.1

@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-algoan
+  namespace: algoan
+spec:
+  selector:
+    app: algoan
+  ports:
+  - name: algoan
+    protocol: TCP
+    port: 80
+    targetPort: 9376
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: algoan
+  name: algoan
+  namespace: algoan
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: algoan
+  template:
+    metadata:
+      labels:
+        app: algoan
+    spec:
+      containers:
+      - image: eu.gcr.io/projectAlgoanID/algoan_image:v0.0.O
+        name: algoan
+        env:
+        - name: CONNECT_MYSQL
+          values: "svc-mysql.algoan.svc.cluster.local"
+        resources:
+          limits:
+            cpu: "2"
+          requests:
+            cpu: "500m"
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: algoan
+  namespace: algoan
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: algoan
+  minReplicas: 1
+  maxReplicas: 30
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0  # Do not gather recommendations, instantly scale up to the calculated number of replicas
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15  # We can double pods every <periodSeconds> seconds.
+        - type: Pods
+          value: 10
+          periodSeconds: 15  # We can add up to <value> pods every <periodSeconds> seconds.
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait <stabilizationWindowSeconds> min for the largest recommendation and then scale down to that value
+      policies:
+        - type: Percent
+          value: 30
+          periodSeconds: 30
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-netpol
+  namespace: algoan
+spec:
+  podSelector:
+    matchLabels:
+      app: algoan
+  policyTypes:
+    - Egress
+  egress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: algoan
+          podSelector:
+            matchLabels:
+              app: mysql
+      ports:
+        - protocol: TCP
+          port: 3306
